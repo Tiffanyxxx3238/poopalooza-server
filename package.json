@@ -1,7 +1,7 @@
 {
   "name": "poopalooza-server",
   "version": "1.0.0",
-  "description": "AI Assistant Server for Poopalooza App",
+  "description": "AI Assistant Server",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
