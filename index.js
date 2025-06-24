@@ -7,16 +7,16 @@ console.log('API Key loaded:', process.env.GOOGLE_API_KEY ? '✓' : '✗');
 
 const app = express();
 app.use(cors());
-app.use(express.json()); // 使用內建的 JSON parser 替代 body-parser
+app.use(express.json());
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 // 免費模型優先順序
 const freeModelPriority = [
-  'gemini-1.5-flash',      // 免費：15 requests/min, 1M tokens/min, 1,500 requests/day
-  'gemini-1.5-pro',        // 免費：2 requests/min, 32K tokens/min, 50 requests/day  
-  'gemini-1.0-pro',        // 免費：15 requests/min, 1M tokens/min, 1,500 requests/day
-  'gemini-pro'             // 備用免費選項
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-1.0-pro',
+  'gemini-pro'
 ];
 
 let cachedModel = null;
@@ -24,13 +24,57 @@ let cachedModelName = null;
 let requestCount = 0;
 let lastResetTime = Date.now();
 
-// 重置請求計數器（每分鐘重置）
+// 重置請求計數器
 function resetRequestCounter() {
   const now = Date.now();
-  if (now - lastResetTime > 60000) { // 60秒
+  if (now - lastResetTime > 60000) {
     requestCount = 0;
     lastResetTime = now;
   }
+}
+
+// 格式化 AI 回應
+function formatAIResponse(text) {
+  return text
+    // 移除多餘的星號和格式標記
+    .replace(/\*\*\*/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '• ')
+    
+    // 改善分段：移除過多的換行
+    .replace(/\n\n\n+/g, '\n\n')
+    
+    // 確保重要標點符號後有適當換行
+    .replace(/([。！？：])\s*([^。！？：\n])/g, '$1\n\n$2')
+    
+    // 清理列表項目格式
+    .replace(/^•\s*/gm, '• ')
+    .replace(/^([0-9]+)\.\s*/gm, '$1. ')
+    
+    // 移除開頭和結尾的多餘空白
+    .trim()
+    
+    // 確保不會有空行在開頭
+    .replace(/^\n+/, '')
+    
+    // 限制連續空行不超過一個
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+// 生成改善的 prompt
+function createEnhancedPrompt(question) {
+  return `你是一個專業的腸道健康與生活習慣諮詢助手，名叫 PoopBot。請用繁體中文回答用戶關於大便健康、飲食、運動、生活習慣等相關問題。
+
+📋 **回答格式要求**：
+• 使用清晰簡潔的段落，每段不超過 3 行
+• 重要建議用分點列出
+• 避免過度使用醫學術語，使用易懂的語言
+• 提供實用可行的建議
+• 如有嚴重症狀，建議就醫
+
+👤 **用戶問題**：${question}
+
+🩺 **專業建議**：`;
 }
 
 async function getAvailableModel() {
@@ -39,7 +83,6 @@ async function getAvailableModel() {
       console.log(`🔍 測試免費模型: ${modelName}`);
       const model = genAI.getGenerativeModel({ model: modelName });
       
-      // 簡單測試請求
       const testResult = await model.generateContent('Hello');
       const testResponse = await testResult.response;
       await testResponse.text();
@@ -61,7 +104,7 @@ app.get('/', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
-    features: ['AI Chat', 'Free Models', 'Rate Limiting']
+    features: ['AI Chat', 'Free Models', 'Rate Limiting', 'Enhanced Formatting']
   });
 });
 
@@ -79,11 +122,9 @@ app.post('/api/assistant', async (req, res) => {
     });
   }
 
-  // 重置請求計數器
   resetRequestCounter();
   
-  // 檢查請求頻率限制（保守估計）
-  if (requestCount >= 10) { // 保守的每分鐘限制
+  if (requestCount >= 10) {
     return res.status(429).json({ 
       answer: '請求太頻繁，請稍後再試。免費版本有使用限制。',
       error: 'Rate limit exceeded',
@@ -94,7 +135,6 @@ app.post('/api/assistant', async (req, res) => {
   }
   
   try {
-    // 如果還沒有快取模型，獲取可用的免費模型
     if (!cachedModel) {
       const result = await getAvailableModel();
       cachedModel = result.model;
@@ -105,9 +145,15 @@ app.post('/api/assistant', async (req, res) => {
     
     requestCount++;
     
-    const result = await cachedModel.generateContent(question.trim());
+    // 使用改善的 prompt
+    const enhancedPrompt = createEnhancedPrompt(question.trim());
+    
+    const result = await cachedModel.generateContent(enhancedPrompt);
     const response = await result.response;
-    const answer = response.text();
+    let answer = response.text();
+    
+    // 格式化回應
+    answer = formatAIResponse(answer);
     
     res.json({ 
       answer,
@@ -122,18 +168,16 @@ app.post('/api/assistant', async (req, res) => {
   } catch (err) {
     console.error('❌ AI 調用錯誤：', err);
     
-    // 處理額度超出錯誤
     if (err.message.includes('quota') || err.message.includes('rate') || err.message.includes('429')) {
       return res.status(429).json({ 
         answer: '免費額度已用完，請稍後再試或考慮升級到付費版本。',
         error: 'Quota exceeded',
-        retryAfter: 3600, // 建議1小時後再試
+        retryAfter: 3600,
         model: cachedModelName,
         plan: 'free'
       });
     }
     
-    // 如果是模型問題，嘗試其他免費模型
     if (err.message.includes('404') || err.message.includes('NOT_FOUND')) {
       console.log('🔄 嘗試其他免費模型...');
       cachedModel = null;
@@ -144,9 +188,12 @@ app.post('/api/assistant', async (req, res) => {
         cachedModel = result.model;
         cachedModelName = result.modelName;
         
-        const retryResult = await cachedModel.generateContent(question.trim());
+        const enhancedPrompt = createEnhancedPrompt(question.trim());
+        const retryResult = await cachedModel.generateContent(enhancedPrompt);
         const retryResponse = await retryResult.response;
-        const answer = retryResponse.text();
+        let answer = retryResponse.text();
+        
+        answer = formatAIResponse(answer);
         
         return res.json({ 
           answer,
@@ -183,7 +230,6 @@ app.get('/api/models/free', async (req, res) => {
       const testResponse = await testResult.response;
       await testResponse.text();
       
-      // 根據模型名稱提供免費額度資訊
       let limits = '';
       if (modelName === 'gemini-1.5-flash') {
         limits = '15 requests/min, 1,500/day';
@@ -227,7 +273,7 @@ app.get('/api/usage', (req, res) => {
   res.json({
     plan: 'free',
     currentRequests: requestCount,
-    estimatedLimit: 10, // 保守估計
+    estimatedLimit: 10,
     resetTime: new Date(lastResetTime + 60000).toISOString(),
     model: cachedModelName || 'Not selected',
     tips: [
@@ -243,10 +289,8 @@ app.get('/api/usage', (req, res) => {
 // 健康檢查端點（詳細版）
 app.get('/api/health', async (req, res) => {
   try {
-    // 檢查 API Key
     const hasApiKey = !!process.env.GOOGLE_API_KEY;
     
-    // 檢查模型狀態
     let modelStatus = 'unknown';
     if (cachedModel && cachedModelName) {
       modelStatus = `active: ${cachedModelName}`;
@@ -310,7 +354,6 @@ app.use((req, res) => {
   });
 });
 
-// 使用環境變數或預設端口
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 免費 AI Assistant 伺服器啟動於 port ${PORT}`);
@@ -319,4 +362,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🏥 健康檢查: http://localhost:${PORT}/api/health`);
   console.log(`💡 使用的是完全免費的 Google AI Studio API!`);
   console.log(`🌍 可通過網路訪問`);
+  console.log(`📝 已啟用文字格式化功能`);
 });
