@@ -63,18 +63,56 @@ function formatAIResponse(text) {
 
 // 生成改善的 prompt
 function createEnhancedPrompt(question) {
-  return `你是一個專業的腸道健康與生活習慣諮詢助手，名叫 PoopBot。請用繁體中文回答用戶關於大便健康、飲食、運動、生活習慣等相關問題。
-
-📋 **回答格式要求**：
+  // 檢測用戶問題的語言
+  const isChinese = /[\u4e00-\u9fff]/.test(question);
+  const isJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(question);
+  const isKorean = /[\uac00-\ud7af]/.test(question);
+  
+  let languageInstruction = '';
+  let formatRequirements = '';
+  
+  if (isChinese) {
+    languageInstruction = '請用繁體中文回答';
+    formatRequirements = `📋 **回答格式要求**：
 • 使用清晰簡潔的段落，每段不超過 3 行
 • 重要建議用分點列出
 • 避免過度使用醫學術語，使用易懂的語言
 • 提供實用可行的建議
-• 如有嚴重症狀，建議就醫
+• 如有嚴重症狀，建議就醫`;
+  } else if (isJapanese) {
+    languageInstruction = 'Please respond in Japanese';
+    formatRequirements = `📋 **回答形式の要件**：
+• 明確で簡潔な段落を使用し、各段落は3行以内
+• 重要な提案を箇条書きで記載
+• 専門用語を避け、分かりやすい言葉を使用
+• 実用的で実行可能な提案を提供
+• 深刻な症状がある場合は医師の診察を推奨`;
+  } else if (isKorean) {
+    languageInstruction = 'Please respond in Korean';
+    formatRequirements = `📋 **답변 형식 요구사항**：
+• 명확하고 간결한 단락 사용, 각 단락은 3줄 이내
+• 중요한 제안을 항목별로 나열
+• 전문 용어를 피하고 이해하기 쉬운 언어 사용
+• 실용적이고 실행 가능한 제안 제공
+• 심각한 증상이 있는 경우 의사 진료 권장`;
+  } else {
+    // 默認英文
+    languageInstruction = 'Please respond in English';
+    formatRequirements = `📋 **Response Format Requirements**：
+• Use clear and concise paragraphs, no more than 3 lines per paragraph
+• List important suggestions in bullet points
+• Avoid excessive medical terminology, use easy-to-understand language
+• Provide practical and actionable advice
+• Recommend medical consultation for serious symptoms`;
+  }
 
-👤 **用戶問題**：${question}
+  return `You are a professional digestive health and lifestyle consultation assistant named PoopBot. ${languageInstruction} and answer user questions about bowel health, diet, exercise, lifestyle habits, and related topics.
 
-🩺 **專業建議**：`;
+${formatRequirements}
+
+👤 **User Question**: ${question}
+
+🩺 **Professional Advice**:`;
 }
 
 async function getAvailableModel() {
