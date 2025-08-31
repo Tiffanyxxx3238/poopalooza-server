@@ -13,6 +13,7 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 // 免費模型優先順序
 const freeModelPriority = [
+  'gemini-2.0',
   'gemini-1.5-flash',
   'gemini-1.5-pro',
   'gemini-1.0-pro',
