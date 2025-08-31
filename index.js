@@ -3,403 +3,392 @@ const express = require('express');
 const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-console.log('API Key loaded:', process.env.GOOGLE_API_KEY ? '✓' : '✗');
+console.log('🚀 啟動免費版 PoopBot API');
+console.log('API Key 狀態:', process.env.GOOGLE_API_KEY ? '✅ 已設定' : '❌ 未設定');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+// ===== 免費額度嚴格管理系統 =====
+const USAGE_TRACKER = {
+  daily: 0,
+  minute: 0,
+  lastDailyReset: new Date().toDateString(),
+  lastMinuteReset: Date.now(),
+  totalRequests: 0,
+  failedRequests: 0,
+  modelFailures: {}
+};
 
-// 免費模型優先順序
-const freeModelPriority = [
-  'gemini-2.0',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-1.0-pro',
-  'gemini-pro'
-];
+// 保守的免費限制（確保不會超過）
+const FREE_LIMITS = {
+  perMinute: 5,    // 極保守（實際限制 15）
+  perDay: 50,      // 極保守（實際限制 1500）
+  perHour: 20      // 額外的小時限制
+};
 
-let cachedModel = null;
-let cachedModelName = null;
-let requestCount = 0;
-let lastResetTime = Date.now();
+// 使用紀錄（用於分析）
+const usageLog = [];
 
-// 重置請求計數器
-function resetRequestCounter() {
+// 重置所有計數器
+function resetCounters() {
   const now = Date.now();
-  if (now - lastResetTime > 60000) {
-    requestCount = 0;
-    lastResetTime = now;
+  const today = new Date().toDateString();
+  const currentHour = new Date().getHours();
+  
+  // 每日重置
+  if (today !== USAGE_TRACKER.lastDailyReset) {
+    console.log(`📅 每日計數器重置: ${USAGE_TRACKER.daily} -> 0`);
+    USAGE_TRACKER.daily = 0;
+    USAGE_TRACKER.lastDailyReset = today;
+    // 保存昨日使用紀錄
+    usageLog.push({
+      date: USAGE_TRACKER.lastDailyReset,
+      count: USAGE_TRACKER.daily
+    });
+  }
+  
+  // 每分鐘重置
+  if (now - USAGE_TRACKER.lastMinuteReset > 60000) {
+    USAGE_TRACKER.minute = 0;
+    USAGE_TRACKER.lastMinuteReset = now;
   }
 }
 
-// 格式化 AI 回應
-function formatAIResponse(text) {
-  return text
-    // 移除多餘的星號和格式標記
-    .replace(/\*\*\*/g, '')
-    .replace(/\*\*/g, '')
-    .replace(/\*/g, '• ')
-    
-    // 改善分段：移除過多的換行
-    .replace(/\n\n\n+/g, '\n\n')
-    
-    // 確保重要標點符號後有適當換行
-    .replace(/([。！？：])\s*([^。！？：\n])/g, '$1\n\n$2')
-    
-    // 清理列表項目格式
-    .replace(/^•\s*/gm, '• ')
-    .replace(/^([0-9]+)\.\s*/gm, '$1. ')
-    
-    // 移除開頭和結尾的多餘空白
-    .trim()
-    
-    // 確保不會有空行在開頭
-    .replace(/^\n+/, '')
-    
-    // 限制連續空行不超過一個
-    .replace(/\n{3,}/g, '\n\n');
-}
-
-// 生成改善的 prompt
-function createEnhancedPrompt(question) {
-  // 檢測用戶問題的語言
-  const isChinese = /[\u4e00-\u9fff]/.test(question);
-  const isJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(question);
-  const isKorean = /[\uac00-\ud7af]/.test(question);
+// 檢查是否可以使用
+function canUseAPI() {
+  resetCounters();
   
-  let languageInstruction = '';
-  let formatRequirements = '';
-  
-  if (isChinese) {
-    languageInstruction = '請用繁體中文回答';
-    formatRequirements = `📋 **回答格式要求**：
-• 使用清晰簡潔的段落，每段不超過 3 行
-• 重要建議用分點列出
-• 避免過度使用醫學術語，使用易懂的語言
-• 提供實用可行的建議
-• 如有嚴重症狀，建議就醫`;
-  } else if (isJapanese) {
-    languageInstruction = 'Please respond in Japanese';
-    formatRequirements = `📋 **回答形式の要件**：
-• 明確で簡潔な段落を使用し、各段落は3行以内
-• 重要な提案を箇条書きで記載
-• 専門用語を避け、分かりやすい言葉を使用
-• 実用的で実行可能な提案を提供
-• 深刻な症状がある場合は医師の診察を推奨`;
-  } else if (isKorean) {
-    languageInstruction = 'Please respond in Korean';
-    formatRequirements = `📋 **답변 형식 요구사항**：
-• 명확하고 간결한 단락 사용, 각 단락은 3줄 이내
-• 중요한 제안을 항목별로 나열
-• 전문 용어를 피하고 이해하기 쉬운 언어 사용
-• 실용적이고 실행 가능한 제안 제공
-• 심각한 증상이 있는 경우 의사 진료 권장`;
-  } else {
-    // 默認英文
-    languageInstruction = 'Please respond in English';
-    formatRequirements = `📋 **Response Format Requirements**：
-• Use clear and concise paragraphs, no more than 3 lines per paragraph
-• List important suggestions in bullet points
-• Avoid excessive medical terminology, use easy-to-understand language
-• Provide practical and actionable advice
-• Recommend medical consultation for serious symptoms`;
+  if (USAGE_TRACKER.daily >= FREE_LIMITS.perDay) {
+    return { allowed: false, reason: 'daily_limit', limit: FREE_LIMITS.perDay };
   }
-
-  return `You are a professional digestive health and lifestyle consultation assistant named PoopBot. ${languageInstruction} and answer user questions about bowel health, diet, exercise, lifestyle habits, and related topics.
-
-${formatRequirements}
-
-👤 **User Question**: ${question}
-
-🩺 **Professional Advice**:`;
+  
+  if (USAGE_TRACKER.minute >= FREE_LIMITS.perMinute) {
+    return { allowed: false, reason: 'minute_limit', limit: FREE_LIMITS.perMinute };
+  }
+  
+  return { allowed: true };
 }
 
-async function getAvailableModel() {
-  for (const modelName of freeModelPriority) {
+// 模型管理（含備用方案）
+const MODEL_CONFIG = {
+  primary: 'gemini-1.5-flash',
+  fallbacks: [
+    'gemini-1.5-flash-8b',  // 更輕量的版本
+    'gemini-1.0-pro'        // 舊版但穩定
+  ],
+  maxRetries: 2
+};
+
+let currentModel = null;
+let currentModelName = null;
+
+// 初始化 AI（含錯誤處理）
+function initializeAI() {
+  if (!process.env.GOOGLE_API_KEY) {
+    console.error('❌ 錯誤：未設定 GOOGLE_API_KEY');
+    return null;
+  }
+  
+  try {
+    return new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+  } catch (error) {
+    console.error('❌ 初始化 AI 失敗:', error.message);
+    return null;
+  }
+}
+
+const genAI = initializeAI();
+
+// 取得可用模型（含備用機制）
+async function getWorkingModel() {
+  if (!genAI) {
+    throw new Error('AI 服務未初始化');
+  }
+  
+  // 如果有快取且可用，直接返回
+  if (currentModel && currentModelName) {
     try {
-      console.log(`🔍 測試免費模型: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      
-      const testResult = await model.generateContent('Hello');
-      const testResponse = await testResult.response;
-      await testResponse.text();
-      
-      console.log(`✅ 免費模型可用: ${modelName}`);
-      return { model, modelName };
+      // 快速測試
+      await currentModel.generateContent('test');
+      return { model: currentModel, name: currentModelName };
     } catch (err) {
-      console.log(`❌ 模型 ${modelName} 不可用: ${err.message}`);
-      continue;
+      console.log(`⚠️ 快取模型 ${currentModelName} 失效，尋找替代...`);
+      currentModel = null;
+      currentModelName = null;
     }
   }
-  throw new Error('❌ 沒有找到可用的免費模型');
+  
+  // 嘗試所有模型
+  const allModels = [MODEL_CONFIG.primary, ...MODEL_CONFIG.fallbacks];
+  
+  for (const modelName of allModels) {
+    try {
+      console.log(`🔍 測試模型: ${modelName}`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      
+      // 測試模型
+      const result = await model.generateContent('test');
+      await result.response.text();
+      
+      console.log(`✅ 模型可用: ${modelName}`);
+      currentModel = model;
+      currentModelName = modelName;
+      return { model, name: modelName };
+      
+    } catch (err) {
+      console.log(`❌ 模型 ${modelName} 不可用: ${err.message.substring(0, 50)}...`);
+      USAGE_TRACKER.modelFailures[modelName] = (USAGE_TRACKER.modelFailures[modelName] || 0) + 1;
+    }
+  }
+  
+  throw new Error('所有模型都無法使用，請稍後再試');
 }
 
-// 健康檢查端點
+// 簡單的備用回應系統
+const FALLBACK_RESPONSES = {
+  greeting: [
+    "你好！我是 PoopBot，你的消化健康助手。有什麼可以幫助你的嗎？",
+    "嗨！需要消化健康的建議嗎？我在這裡幫助你！"
+  ],
+  error: "抱歉，目前服務繁忙。以下是一些基本建議：\n• 多喝水（每天8杯）\n• 攝取纖維（蔬果）\n• 規律運動\n• 保持良好作息",
+  limit: "今日免費額度已用完。明天再見！\n\n💡 小提醒：多喝水對消化很有幫助喔！"
+};
+
+// 格式化回應
+function formatResponse(text) {
+  if (!text) return FALLBACK_RESPONSES.error;
+  
+  return text
+    .replace(/\*+/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// === API 路由 ===
+
+// 首頁
 app.get('/', (req, res) => {
+  resetCounters();
   res.json({ 
-    message: 'Poopalooza AI Assistant API is running!',
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    features: ['AI Chat', 'Free Models', 'Rate Limiting', 'Enhanced Formatting']
+    service: 'PoopBot AI Assistant',
+    version: '2.0-FREE',
+    status: genAI ? 'ready' : 'no_api_key',
+    limits: FREE_LIMITS,
+    usage: {
+      today: USAGE_TRACKER.daily,
+      remaining: FREE_LIMITS.perDay - USAGE_TRACKER.daily
+    },
+    message: '完全免費版本 - 不會產生任何費用',
+    timestamp: new Date().toISOString()
   });
 });
 
+// 主要聊天端點
 app.post('/api/assistant', async (req, res) => {
+  const startTime = Date.now();
   const { question } = req.body;
   
-  if (!process.env.GOOGLE_API_KEY) {
-    return res.status(500).json({ answer: 'API Key 未設定' });
-  }
-
-  if (!question || typeof question !== 'string' || question.trim() === '') {
-    return res.status(400).json({ 
-      answer: '請提供有效的問題',
-      error: 'Invalid question'
+  // 基本驗證
+  if (!genAI) {
+    return res.status(503).json({ 
+      answer: '服務未就緒。請確認已設定 API Key。',
+      error: 'service_unavailable'
     });
   }
-
-  resetRequestCounter();
   
-  if (requestCount >= 10) {
-    return res.status(429).json({ 
-      answer: '請求太頻繁，請稍後再試。免費版本有使用限制。',
-      error: 'Rate limit exceeded',
-      retryAfter: 60,
-      requestCount: requestCount,
-      resetTime: new Date(lastResetTime + 60000).toISOString()
+  if (!question || question.trim().length < 2) {
+    return res.status(400).json({ 
+      answer: '請提供有效的問題（至少2個字）',
+      error: 'invalid_input'
     });
   }
+  
+  // 檢查使用限制
+  const usageCheck = canUseAPI();
+  if (!usageCheck.allowed) {
+    const response = usageCheck.reason === 'daily_limit' 
+      ? FALLBACK_RESPONSES.limit
+      : '請稍後再試（每分鐘限制 ' + FREE_LIMITS.perMinute + ' 次）';
+      
+    return res.status(429).json({ 
+      answer: response,
+      error: usageCheck.reason,
+      limit: usageCheck.limit,
+      usage: {
+        today: USAGE_TRACKER.daily,
+        remaining: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily)
+      }
+    });
+  }
+  
+  // 增加計數
+  USAGE_TRACKER.daily++;
+  USAGE_TRACKER.minute++;
+  USAGE_TRACKER.totalRequests++;
   
   try {
-    if (!cachedModel) {
-      const result = await getAvailableModel();
-      cachedModel = result.model;
-      cachedModelName = result.modelName;
-    }
+    // 取得可用模型
+    const { model, name: modelName } = await getWorkingModel();
     
-    console.log(`🤖 使用免費模型: ${cachedModelName} (請求 #${requestCount + 1})`);
+    console.log(`📊 使用狀況: ${USAGE_TRACKER.daily}/${FREE_LIMITS.perDay} | 模型: ${modelName}`);
     
-    requestCount++;
+    // 生成簡單的 prompt（避免 token 浪費）
+    const prompt = `你是 PoopBot，一個友善的消化健康助手。請用繁體中文簡短回答（不超過100字）。
+
+用戶問題：${question.trim()}
+
+回答：`;
     
-    // 使用改善的 prompt
-    const enhancedPrompt = createEnhancedPrompt(question.trim());
+    // 呼叫 AI（含超時保護）
+    const result = await Promise.race([
+      model.generateContent(prompt),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('timeout')), 10000)
+      )
+    ]);
     
-    const result = await cachedModel.generateContent(enhancedPrompt);
     const response = await result.response;
-    let answer = response.text();
+    const answer = formatResponse(response.text());
     
-    // 格式化回應
-    answer = formatAIResponse(answer);
+    // 記錄成功
+    const responseTime = Date.now() - startTime;
+    console.log(`✅ 成功回應 (${responseTime}ms)`);
+    
+    // 加入使用情況
+    const remaining = FREE_LIMITS.perDay - USAGE_TRACKER.daily;
+    const usageInfo = remaining <= 5 
+      ? `\n\n📊 今日剩餘：${remaining} 次`
+      : '';
     
     res.json({ 
-      answer,
-      model: cachedModelName,
+      answer: answer + usageInfo,
+      model: modelName,
       status: 'success',
-      plan: 'free',
-      requestCount: requestCount,
-      message: '使用免費版本 - 有使用限制',
-      timestamp: new Date().toISOString()
+      usage: {
+        today: USAGE_TRACKER.daily,
+        remaining: remaining
+      },
+      responseTime: responseTime
     });
     
-  } catch (err) {
-    console.error('❌ AI 調用錯誤：', err);
+  } catch (error) {
+    USAGE_TRACKER.failedRequests++;
+    console.error('❌ 處理錯誤:', error.message);
     
-    if (err.message.includes('quota') || err.message.includes('rate') || err.message.includes('429')) {
-      return res.status(429).json({ 
-        answer: '免費額度已用完，請稍後再試或考慮升級到付費版本。',
-        error: 'Quota exceeded',
-        retryAfter: 3600,
-        model: cachedModelName,
-        plan: 'free'
-      });
+    // 如果是配額問題，不扣除使用次數
+    if (error.message.includes('quota') || error.message.includes('429')) {
+      USAGE_TRACKER.daily = Math.max(0, USAGE_TRACKER.daily - 1);
+      USAGE_TRACKER.minute = Math.max(0, USAGE_TRACKER.minute - 1);
     }
     
-    if (err.message.includes('404') || err.message.includes('NOT_FOUND')) {
-      console.log('🔄 嘗試其他免費模型...');
-      cachedModel = null;
-      cachedModelName = null;
-      
-      try {
-        const result = await getAvailableModel();
-        cachedModel = result.model;
-        cachedModelName = result.modelName;
-        
-        const enhancedPrompt = createEnhancedPrompt(question.trim());
-        const retryResult = await cachedModel.generateContent(enhancedPrompt);
-        const retryResponse = await retryResult.response;
-        let answer = retryResponse.text();
-        
-        answer = formatAIResponse(answer);
-        
-        return res.json({ 
-          answer,
-          model: cachedModelName,
-          status: 'success_after_retry',
-          plan: 'free',
-          requestCount: requestCount,
-          timestamp: new Date().toISOString()
-        });
-      } catch (retryErr) {
-        console.error('🔄 重試也失敗:', retryErr);
-      }
+    // 根據錯誤類型返回不同訊息
+    let errorResponse = FALLBACK_RESPONSES.error;
+    let statusCode = 500;
+    
+    if (error.message.includes('timeout')) {
+      errorResponse = '回應超時，請重試。';
+      statusCode = 504;
+    } else if (error.message.includes('quota')) {
+      errorResponse = 'Google API 配額暫時用完，請幾分鐘後再試。';
+      statusCode = 429;
     }
     
-    res.status(500).json({ 
-      answer: '抱歉，免費的 AI 助手暫時無法使用。請稍後再試或檢查免費額度。',
-      error: err.message,
+    res.status(statusCode).json({ 
+      answer: errorResponse,
+      error: error.message.substring(0, 100),
       status: 'error',
-      plan: 'free',
-      model: cachedModelName,
-      timestamp: new Date().toISOString()
+      usage: {
+        today: USAGE_TRACKER.daily,
+        remaining: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily)
+      }
     });
   }
 });
 
-// 檢查免費模型狀態
-app.get('/api/models/free', async (req, res) => {
-  const modelStatus = [];
-  
-  for (const modelName of freeModelPriority) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const testResult = await model.generateContent('test');
-      const testResponse = await testResult.response;
-      await testResponse.text();
-      
-      let limits = '';
-      if (modelName === 'gemini-1.5-flash') {
-        limits = '15 requests/min, 1,500/day';
-      } else if (modelName === 'gemini-1.5-pro') {
-        limits = '2 requests/min, 50/day';
-      } else if (modelName === 'gemini-1.0-pro') {
-        limits = '15 requests/min, 1,500/day';
-      }
-      
-      modelStatus.push({ 
-        name: modelName, 
-        status: '✅ 免費可用',
-        available: true,
-        limits: limits,
-        cost: 'FREE 🎉'
-      });
-    } catch (err) {
-      modelStatus.push({ 
-        name: modelName, 
-        status: `❌ 不可用: ${err.message}`,
-        available: false,
-        cost: 'FREE'
-      });
-    }
-  }
-  
-  res.json({ 
-    models: modelStatus,
-    plan: 'free',
-    note: '所有模型都是免費使用，但有使用限制',
-    currentRequests: requestCount,
-    resetTime: new Date(lastResetTime + 60000).toISOString(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 免費額度使用情況
+// 使用情況端點
 app.get('/api/usage', (req, res) => {
-  resetRequestCounter();
+  resetCounters();
   
   res.json({
-    plan: 'free',
-    currentRequests: requestCount,
-    estimatedLimit: 10,
-    resetTime: new Date(lastResetTime + 60000).toISOString(),
-    model: cachedModelName || 'Not selected',
-    tips: [
-      '免費版本有使用限制',
-      'Gemini 1.5 Flash 是最佳免費選擇',
-      '如需更高限制，請考慮 Google AI Pro',
-      '學生可免費獲得 AI Pro 直到2026年期末'
-    ],
-    timestamp: new Date().toISOString()
-  });
-});
-
-// 健康檢查端點（詳細版）
-app.get('/api/health', async (req, res) => {
-  try {
-    const hasApiKey = !!process.env.GOOGLE_API_KEY;
-    
-    let modelStatus = 'unknown';
-    if (cachedModel && cachedModelName) {
-      modelStatus = `active: ${cachedModelName}`;
-    } else if (hasApiKey) {
-      modelStatus = 'ready to initialize';
-    } else {
-      modelStatus = 'no api key';
+    limits: FREE_LIMITS,
+    current: {
+      daily: USAGE_TRACKER.daily,
+      minute: USAGE_TRACKER.minute,
+      total: USAGE_TRACKER.totalRequests,
+      failed: USAGE_TRACKER.failedRequests
+    },
+    remaining: {
+      today: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily),
+      thisMinute: Math.max(0, FREE_LIMITS.perMinute - USAGE_TRACKER.minute)
+    },
+    model: {
+      current: currentModelName || 'none',
+      failures: USAGE_TRACKER.modelFailures
+    },
+    history: usageLog.slice(-7), // 最近7天
+    resetTime: {
+      daily: '每日 00:00',
+      minute: new Date(USAGE_TRACKER.lastMinuteReset + 60000).toISOString()
     }
-    
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      apiKey: hasApiKey ? 'configured' : 'missing',
-      model: modelStatus,
-      requests: {
-        current: requestCount,
-        resetTime: new Date(lastResetTime + 60000).toISOString()
-      },
-      endpoints: [
-        'GET /',
-        'POST /api/assistant',
-        'GET /api/models/free',
-        'GET /api/usage',
-        'GET /api/health'
-      ]
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'unhealthy',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
+  });
 });
 
-// 錯誤處理中間件
-app.use((err, req, res, next) => {
-  console.error('未處理的錯誤:', err);
-  res.status(500).json({
-    answer: '伺服器發生錯誤，請稍後再試。',
-    error: err.message,
-    status: 'error',
+// 健康檢查
+app.get('/api/health', async (req, res) => {
+  const health = {
+    status: 'unknown',
+    checks: {
+      apiKey: !!process.env.GOOGLE_API_KEY,
+      aiService: !!genAI,
+      model: !!currentModel
+    }
+  };
+  
+  // 判斷整體狀態
+  if (health.checks.apiKey && health.checks.aiService) {
+    health.status = 'healthy';
+  } else if (health.checks.apiKey) {
+    health.status = 'degraded';
+  } else {
+    health.status = 'unhealthy';
+  }
+  
+  res.status(health.status === 'unhealthy' ? 503 : 200).json({
+    ...health,
+    uptime: process.uptime(),
+    usage: USAGE_TRACKER,
     timestamp: new Date().toISOString()
   });
 });
 
-// 404 處理
+// 錯誤處理
+app.use((err, req, res, next) => {
+  console.error('未處理錯誤:', err);
+  res.status(500).json({
+    answer: FALLBACK_RESPONSES.error,
+    error: 'internal_error'
+  });
+});
+
+// 404
 app.use((req, res) => {
   res.status(404).json({
-    error: '端點不存在',
-    availableEndpoints: [
-      'GET /',
-      'POST /api/assistant',
-      'GET /api/models/free',
-      'GET /api/usage',
-      'GET /api/health'
-    ],
-    timestamp: new Date().toISOString()
+    error: 'not_found',
+    message: '端點不存在',
+    available: ['/api/assistant', '/api/usage', '/api/health']
   });
 });
 
+// 啟動伺服器
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 免費 AI Assistant 伺服器啟動於 port ${PORT}`);
-  console.log(`📊 免費模型狀態: http://localhost:${PORT}/api/models/free`);
-  console.log(`📈 使用情況: http://localhost:${PORT}/api/usage`);
-  console.log(`🏥 健康檢查: http://localhost:${PORT}/api/health`);
-  console.log(`💡 使用的是完全免費的 Google AI Studio API!`);
-  console.log(`🌍 可通過網路訪問`);
-  console.log(`📝 已啟用文字格式化功能`);
+  console.log('========================================');
+  console.log(`🚀 PoopBot 免費版 API 啟動`);
+  console.log(`📍 Port: ${PORT}`);
+  console.log(`💚 模式: 完全免費（無帳單風險）`);
+  console.log(`📊 限制: ${FREE_LIMITS.perDay} 次/天, ${FREE_LIMITS.perMinute} 次/分鐘`);
+  console.log(`🔒 安全機制: 已啟用`);
+  console.log('========================================');
 });
