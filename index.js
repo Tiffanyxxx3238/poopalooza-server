@@ -9,7 +9,68 @@ console.log('API Key 狀態:', process.env.GOOGLE_API_KEY ? '✅ 已設定' : '�
 const app = express();
 app.use(cors());
 app.use(express.json());
+// ===== App 功能介紹系統 =====
+const APP_FEATURES = {
+  mainFeatures: {
+    zh: [
+      "💩 便便記錄：記錄每日排便狀況，包括時間、顏色、形狀、質地",
+      "📊 健康分析：視覺化追蹤消化健康趨勢，產生週/月報表",
+      "⏰ 智慧提醒：定時提醒喝水、如廁、服用益生菌",
+      "🤖 AI 健康助手：24/7 回答消化健康相關問題",
+      "🗺️ 廁所地圖：尋找附近公共廁所"
+    ],
+    en: [
+      "💩 Poop Tracking: Record daily bowel movements, time, color, shape, texture",
+      "📊 Health Analysis: Visualize digestive health trends with weekly/monthly reports",
+      "⏰ Smart Reminders: Timely reminders for water intake and bathroom visits",
+      "🤖 AI Health Assistant: 24/7 answers to digestive health questions",
+      "🗺️ Toilet Map: Find nearby public toilets"
+    ]
+  },
+  keywords: [
+    'app', 'APP', '應用程式', '功能', '介紹', '怎麼用', '如何使用',
+    'function', 'feature', 'what', 'how to use', 'help',
+    '特色', '特點', '幫助', '什麼用', '做什麼', 'PoopBot'
+  ]
+};
 
+// 檢測語言
+function detectLanguage(text) {
+  // 檢查是否包含中文字符
+  if (/[\u4e00-\u9fa5]/.test(text)) {
+    return 'zh';
+  }
+  // 預設英文
+  return 'en';
+}
+
+// 檢測是否在詢問 App 功能
+function isAskingAboutApp(question) {
+  const lowerQuestion = question.toLowerCase();
+  return APP_FEATURES.keywords.some(keyword => 
+    lowerQuestion.includes(keyword.toLowerCase())
+  );
+}
+
+// 生成 App 介紹（根據語言）
+function generateAppIntro(question) {
+  const lang = detectLanguage(question);
+  const features = APP_FEATURES.mainFeatures[lang] || APP_FEATURES.mainFeatures.en;
+  
+  if (lang === 'zh') {
+    return `PoopBot App 主要功能：
+
+${features.slice(0, 5).join('\n')}
+
+我們幫你追蹤腸道健康，有問題隨時問我！`;
+  } else {
+    return `PoopBot App Main Features:
+
+${features.slice(0, 5).join('\n')}
+
+We help you track digestive health. Feel free to ask me any questions!`;
+  }
+}
 // ===== 免費額度嚴格管理系統 =====
 const USAGE_TRACKER = {
   daily: 0,
@@ -146,39 +207,19 @@ async function getWorkingModel() {
   throw new Error('所有模型都無法使用，請稍後再試');
 }
 
-// 多語言備用回應系統
+// 簡單的備用回應系統
 const FALLBACK_RESPONSES = {
-  'zh-TW': {
-    error: "抱歉，目前服務繁忙。以下是一些基本建議：\n• 多喝水（每天8杯）\n• 攝取纖維（蔬果）\n• 規律運動\n• 保持良好作息",
-    limit: "今日免費額度已用完。明天再見！\n\n💡 小提醒：多喝水對消化很有幫助喔！"
-  },
-  'zh-CN': {
-    error: "抱歉，当前服务繁忙。以下是一些基本建议：\n• 多喝水（每天8杯）\n• 摄取纤维（蔬果）\n• 规律运动\n• 保持良好作息",
-    limit: "今日免费额度已用完。明天再见！\n\n💡 小提醒：多喝水对消化很有帮助哦！"
-  },
-  'en': {
-    error: "Sorry, service is busy. Here are some basic tips:\n• Drink water (8 glasses/day)\n• Eat fiber (fruits & vegetables)\n• Exercise regularly\n• Maintain good sleep schedule",
-    limit: "Daily free quota exhausted. See you tomorrow!\n\n💡 Tip: Staying hydrated helps digestion!"
-  },
-  'ja': {
-    error: "申し訳ございません。サービスが混雑しています。基本的なアドバイス：\n• 水分補給（1日8杯）\n• 食物繊維摂取\n• 規則的な運動\n• 良い睡眠習慣",
-    limit: "本日の無料利用枠を使い切りました。また明日！\n\n💡 ヒント：水分補給は消化に役立ちます！"
-  },
-  'ko': {
-    error: "죄송합니다. 서비스가 바쁩니다. 기본 조언:\n• 물 마시기 (하루 8잔)\n• 섬유질 섭취\n• 규칙적인 운동\n• 좋은 수면 습관",
-    limit: "오늘의 무료 할당량이 소진되었습니다. 내일 봐요!\n\n💡 팁: 수분 섭취는 소화에 도움이 됩니다!"
-  }
+  greeting: [
+    "你好！我是 PoopBot，你的消化健康助手。有什麼可以幫助你的嗎？",
+    "嗨！需要消化健康的建議嗎？我在這裡幫助你！"
+  ],
+  error: "抱歉，目前服務繁忙。以下是一些基本建議：\n• 多喝水（每天8杯）\n• 攝取纖維（蔬果）\n• 規律運動\n• 保持良好作息",
+  limit: "今日免費額度已用完。明天再見！\n\n💡 小提醒：多喝水對消化很有幫助喔！"
 };
 
-// 取得對應語言的備用回應
-function getFallbackResponse(type, lang = 'en') {
-  const responses = FALLBACK_RESPONSES[lang] || FALLBACK_RESPONSES['en'];
-  return responses[type] || FALLBACK_RESPONSES['en'][type];
-}
-
 // 格式化回應
-function formatResponse(text, lang = 'en') {
-  if (!text) return getFallbackResponse('error', lang);
+function formatResponse(text) {
+  if (!text) return FALLBACK_RESPONSES.error;
   
   return text
     .replace(/\*+/g, '')
@@ -224,14 +265,29 @@ app.post('/api/assistant', async (req, res) => {
       error: 'invalid_input'
     });
   }
-  
+  // === 新增：檢查是否詢問 App 功能 ===
+  if (isAskingAboutApp(question)) {
+    const appIntro = generateAppIntro(question);
+    
+    console.log(`📱 回應 App 介紹（不消耗 API 額度）`);
+    
+    return res.json({
+      answer: appIntro,
+      model: 'app-intro',
+      status: 'success',
+      usage: {
+        today: USAGE_TRACKER.daily,
+        remaining: FREE_LIMITS.perDay - USAGE_TRACKER.daily
+      },
+      responseTime: Date.now() - startTime
+    });
+  }
   // 檢查使用限制
   const usageCheck = canUseAPI();
   if (!usageCheck.allowed) {
-    const lang = detectLanguage(question);
     const response = usageCheck.reason === 'daily_limit' 
-      ? getFallbackResponse('limit', lang)
-      : `請稍後再試（每分鐘限制 ${FREE_LIMITS.perMinute} 次）`;
+      ? FALLBACK_RESPONSES.limit
+      : '請稍後再試（每分鐘限制 ' + FREE_LIMITS.perMinute + ' 次）';
       
     return res.status(429).json({ 
       answer: response,
@@ -255,49 +311,27 @@ app.post('/api/assistant', async (req, res) => {
     
     console.log(`📊 使用狀況: ${USAGE_TRACKER.daily}/${FREE_LIMITS.perDay} | 模型: ${modelName}`);
     
-    // 偵測語言並生成對應的 prompt
-    const detectLanguage = (text) => {
-      if (/[\u4e00-\u9fff]/.test(text)) {
-        // 檢測繁簡中文
-        if (text.includes('嗎') || text.includes('麼') || text.includes('這') || text.includes('說')) {
-          return 'zh-TW'; // 繁體中文
-        }
-        if (text.includes('吗') || text.includes('么') || text.includes('这') || text.includes('说')) {
-          return 'zh-CN'; // 簡體中文
-        }
-        return 'zh-TW'; // 預設繁體
-      }
-      if (/[\u3040-\u309f\u30a0-\u30ff]/.test(text)) return 'ja'; // 日文
-      if (/[\uac00-\ud7af]/.test(text)) return 'ko'; // 韓文
-      if (/[àâäæãåāèéêëēėęîïíīįìôöòóœøōõûüùúūÿñçčšž]/i.test(text)) return 'eu'; // 歐洲語言
-      return 'en'; // 預設英文
-    };
+// 偵測用戶語言
+    const userLang = detectLanguage(question);
     
-    const lang = detectLanguage(question);
-    let langInstruction = '';
-    
-    switch(lang) {
-      case 'zh-TW':
-        langInstruction = '請用繁體中文回答';
-        break;
-      case 'zh-CN':
-        langInstruction = '请用简体中文回答';
-        break;
-      case 'ja':
-        langInstruction = '日本語で答えてください';
-        break;
-      case 'ko':
-        langInstruction = '한국어로 대답해 주세요';
-        break;
-      case 'en':
-      default:
-        langInstruction = 'Please respond in English';
-        break;
-    }
-    
-    const prompt = `You are PoopBot, a friendly digestive health assistant. ${langInstruction}. Keep response concise (under 100 words).
+    // 生成簡單的 prompt（避免 token 浪費）
+    const prompt = userLang === 'zh' 
+      ? `你是 PoopBot，一個友善的消化健康助手，也是 PoopBot App 的 AI 助理。
 
-User Question: ${question.trim()}
+如果用戶詢問 app 功能，可以介紹：便便記錄、健康分析、智慧提醒、廁所地圖等功能。
+
+請用繁體中文簡短回答（不超過100字）。
+
+用戶問題：${question.trim()}
+
+回答：`
+      : `You are PoopBot, a friendly digestive health assistant and the AI assistant for PoopBot App.
+
+If users ask about app features, you can introduce: poop tracking, health analysis, smart reminders, toilet map, etc.
+
+Please answer briefly in English (under 100 words).
+
+User question: ${question.trim()}
 
 Answer:`;
     
@@ -344,8 +378,7 @@ Answer:`;
     }
     
     // 根據錯誤類型返回不同訊息
-    const lang = detectLanguage(question);
-    let errorResponse = getFallbackResponse('error', lang);
+    let errorResponse = FALLBACK_RESPONSES.error;
     let statusCode = 500;
     
     if (error.message.includes('timeout')) {
