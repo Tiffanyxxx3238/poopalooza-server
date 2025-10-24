@@ -287,12 +287,13 @@ function canUseAPI() {
 
 // 模型管理
 const MODEL_CONFIG = {
-  primary: 'gemini-1.5-flash',
+  primary: 'gemini-2.5-flash',      // 最新最快模型
   fallbacks: [
-    'gemini-1.5-flash-8b',
-    'gemini-1.0-pro'
+    'gemini-2.0-flash',              // 備用方案 1
+    'gemini-2.5-pro',                // 備用方案 2（最強但較慢）
+    'gemini-2.0-flash-lite'          // 備用方案 3（輕量版）
   ],
-  maxRetries: 3  // 🔥 增加重試次數
+  maxRetries: 2  // 減少重試次數，加快速度
 };
 
 let currentModel = null;
