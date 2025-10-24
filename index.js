@@ -6,6 +6,12 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 console.log('🚀 啟動免費版 PoopBot API');
 console.log('API Key 狀態:', process.env.GOOGLE_API_KEY ? '✅ 已設定' : '❌ 未設定');
 
+// 🔥 新增：顯示 API Key 資訊（安全檢查）
+if (process.env.GOOGLE_API_KEY) {
+  console.log('🔑 API Key 前10字:', process.env.GOOGLE_API_KEY.substring(0, 10) + '...');
+  console.log('🔑 API Key 長度:', process.env.GOOGLE_API_KEY.length);
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -49,7 +55,7 @@ function isAskingAboutApp(question) {
   );
 }
 
-// 生成 App 介紹（根據語言）
+// 生成 App 介紹
 function generateAppIntro(question) {
   const lang = detectLanguage(question);
   const features = APP_FEATURES.mainFeatures[lang] || APP_FEATURES.mainFeatures.en;
@@ -69,13 +75,11 @@ We help you track digestive health. Feel free to ask me any questions!`;
   }
 }
 
-// ===== 🔥 新增：智能 Prompt 生成系統 =====
+// ===== 智能 Prompt 生成系統 =====
 function createEnhancedPrompt(question, lang) {
-  // 檢測問題類型
   const questionType = detectQuestionType(question);
   
   if (lang === 'zh') {
-    // 繁體中文版本
     const baseInstruction = `你是 PoopBot，專業的消化健康助手和 PoopBot App 的 AI 顧問。
 
 🎯 **你必須提供的回答品質**：
@@ -84,7 +88,6 @@ function createEnhancedPrompt(question, lang) {
 - 提供多面向建議（飲食 + 運動 + 生活習慣）
 - 說明預期效果時間（例如："3-5 天內改善"）`;
 
-    // 根據問題類型給不同的範例
     let example = '';
     
     if (questionType === 'constipation') {
@@ -142,7 +145,6 @@ function createEnhancedPrompt(question, lang) {
 🩺 **請提供深入、實用的專業建議**：`;
 
   } else {
-    // 英文版本
     const baseInstruction = `You are PoopBot, a professional digestive health assistant and AI consultant for PoopBot App.
 
 🎯 **Required Answer Quality**:
@@ -209,7 +211,7 @@ function createEnhancedPrompt(question, lang) {
   }
 }
 
-// 🔥 新增：檢測問題類型
+// 檢測問題類型
 function detectQuestionType(question) {
   const lower = question.toLowerCase();
   
@@ -229,7 +231,7 @@ function detectQuestionType(question) {
   return 'general';
 }
 
-// ===== 免費額度嚴格管理系統 =====
+// ===== 免費額度管理系統 =====
 const USAGE_TRACKER = {
   daily: 0,
   minute: 0,
@@ -237,7 +239,8 @@ const USAGE_TRACKER = {
   lastMinuteReset: Date.now(),
   totalRequests: 0,
   failedRequests: 0,
-  modelFailures: {}
+  modelFailures: {},
+  networkErrors: 0  // 🔥 新增：網路錯誤計數
 };
 
 const FREE_LIMITS = {
@@ -289,7 +292,7 @@ const MODEL_CONFIG = {
     'gemini-1.5-flash-8b',
     'gemini-1.0-pro'
   ],
-  maxRetries: 2
+  maxRetries: 3  // 🔥 增加重試次數
 };
 
 let currentModel = null;
@@ -311,68 +314,134 @@ function initializeAI() {
 
 const genAI = initializeAI();
 
+// 🔥 方案 B：加強版模型獲取（含詳細錯誤和重試）
 async function getWorkingModel() {
   if (!genAI) {
     throw new Error('AI 服務未初始化');
   }
   
+  // 嘗試使用快取模型
   if (currentModel && currentModelName) {
     try {
-      await currentModel.generateContent('test');
+      console.log(`♻️  嘗試使用快取模型: ${currentModelName}`);
+      const testResult = await currentModel.generateContent('test');
+      await testResult.response.text();
+      console.log(`✅ 快取模型可用: ${currentModelName}`);
       return { model: currentModel, name: currentModelName };
     } catch (err) {
-      console.log(`⚠️ 快取模型 ${currentModelName} 失效，尋找替代...`);
+      console.log(`⚠️  快取模型 ${currentModelName} 失效`);
+      console.log(`   失效原因: ${err.message}`);
       currentModel = null;
       currentModelName = null;
     }
   }
   
+  // 嘗試所有可用模型
   const allModels = [MODEL_CONFIG.primary, ...MODEL_CONFIG.fallbacks];
+  console.log(`\n🔍 開始測試 ${allModels.length} 個模型...`);
   
   for (const modelName of allModels) {
+    console.log(`\n📡 測試模型: ${modelName}`);
+    
     try {
-      console.log(`🔍 測試模型: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const model = genAI.getGenerativeModel({ 
+        model: modelName
+      });
       
-      const result = await model.generateContent('test');
-      await result.response.text();
+      // 🔥 重試機制（每個模型嘗試 3 次）
+      let lastError = null;
       
-      console.log(`✅ 模型可用: ${modelName}`);
-      currentModel = model;
-      currentModelName = modelName;
-      return { model, name: modelName };
+      for (let attempt = 1; attempt <= MODEL_CONFIG.maxRetries; attempt++) {
+        try {
+          console.log(`   🔄 嘗試 ${attempt}/${MODEL_CONFIG.maxRetries}...`);
+          
+          const startTime = Date.now();
+          const result = await model.generateContent('test');
+          const response = await result.response;
+          await response.text();
+          const responseTime = Date.now() - startTime;
+          
+          console.log(`   ✅ 成功！回應時間: ${responseTime}ms`);
+          console.log(`✨ 模型 ${modelName} 已就緒\n`);
+          
+          currentModel = model;
+          currentModelName = modelName;
+          return { model, name: modelName };
+          
+        } catch (retryErr) {
+          lastError = retryErr;
+          
+          // 🔥 詳細錯誤分析
+          console.log(`   ❌ 嘗試 ${attempt} 失敗`);
+          console.log(`   錯誤訊息: ${retryErr.message}`);
+          console.log(`   錯誤類型: ${retryErr.constructor.name}`);
+          
+          // 檢查是否為網路錯誤
+          if (retryErr.message.includes('fetch') || 
+              retryErr.message.includes('network') ||
+              retryErr.message.includes('ECONNREFUSED') ||
+              retryErr.message.includes('ETIMEDOUT')) {
+            console.log(`   🌐 這是網路連接問題`);
+            USAGE_TRACKER.networkErrors++;
+          }
+          
+          // 如果還有重試機會，等待後重試
+          if (attempt < MODEL_CONFIG.maxRetries) {
+            const waitTime = attempt * 2000; // 2秒、4秒、6秒
+            console.log(`   ⏳ 等待 ${waitTime/1000} 秒後重試...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+      }
+      
+      // 所有重試都失敗，記錄並繼續下一個模型
+      console.log(`   ⚠️  模型 ${modelName} 的所有嘗試都失敗`);
+      if (lastError) {
+        console.log(`   最後錯誤: ${lastError.message}`);
+      }
+      
+      USAGE_TRACKER.modelFailures[modelName] = (USAGE_TRACKER.modelFailures[modelName] || 0) + 1;
       
     } catch (err) {
-      console.log(`❌ 模型 ${modelName} 不可用: ${err.message.substring(0, 50)}...`);
+      console.log(`   💥 模型 ${modelName} 初始化失敗: ${err.message}`);
       USAGE_TRACKER.modelFailures[modelName] = (USAGE_TRACKER.modelFailures[modelName] || 0) + 1;
     }
+  }
+  
+  // 所有模型都失敗
+  console.log('\n❌ 所有模型都無法使用\n');
+  console.log('📊 錯誤統計:');
+  console.log(`   網路錯誤次數: ${USAGE_TRACKER.networkErrors}`);
+  console.log(`   模型失敗記錄:`, USAGE_TRACKER.modelFailures);
+  
+  // 根據錯誤類型給出建議
+  if (USAGE_TRACKER.networkErrors > 0) {
+    throw new Error('網路連接問題：無法連接到 Google AI API。請檢查：\n1. Render 是否允許外部 API 連接\n2. API Key 是否正確\n3. Google AI Studio 服務狀態');
   }
   
   throw new Error('所有模型都無法使用，請稍後再試');
 }
 
-// 簡單的備用回應系統
+// 備用回應
 const FALLBACK_RESPONSES = {
   greeting: [
     "你好！我是 PoopBot，你的消化健康助手。有什麼可以幫助你的嗎？",
     "嗨！需要消化健康的建議嗎？我在這裡幫助你！"
   ],
   error: "抱歉，目前服務繁忙。以下是一些基本建議：\n• 多喝水（每天8杯）\n• 攝取纖維（蔬果）\n• 規律運動\n• 保持良好作息",
-  limit: "今日免費額度已用完。明天再見！\n\n💡 小提醒：多喝水對消化很有幫助喔！"
+  limit: "今日免費額度已用完。明天再見！\n\n💡 小提醒：多喝水對消化很有幫助喔！",
+  network: "網路連接問題，無法連接到 AI 服務。請稍後再試或聯繫管理員。"
 };
 
-// 🔥 改進：更溫和的格式化（保留更多原始內容）
+// 格式化回應
 function formatResponse(text) {
   if (!text) return FALLBACK_RESPONSES.error;
   
   return text
-    // 保留粗體標記（改用不同符號）
     .replace(/\*\*\*(.+?)\*\*\*/g, '【$1】')
     .replace(/\*\*(.+?)\*\*/g, '【$1】')
-    // 只處理單獨的星號（列表）
     .replace(/^\* /gm, '• ')
     .replace(/^- /gm, '• ')
-    // 清理過多換行
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -383,14 +452,19 @@ app.get('/', (req, res) => {
   resetCounters();
   res.json({ 
     service: 'PoopBot AI Assistant',
-    version: '2.1-ENHANCED',
+    version: '2.1-ENHANCED-DEBUG',
     status: genAI ? 'ready' : 'no_api_key',
     limits: FREE_LIMITS,
     usage: {
       today: USAGE_TRACKER.daily,
       remaining: FREE_LIMITS.perDay - USAGE_TRACKER.daily
     },
-    message: '完全免費版本 - 改進 AI 回答品質',
+    diagnostics: {
+      networkErrors: USAGE_TRACKER.networkErrors,
+      modelFailures: USAGE_TRACKER.modelFailures,
+      currentModel: currentModelName || 'none'
+    },
+    message: '完全免費版本 - 改進 AI 回答品質 + 診斷模式',
     timestamp: new Date().toISOString()
   });
 });
@@ -456,28 +530,30 @@ app.post('/api/assistant', async (req, res) => {
   
   try {
     // 取得可用模型
+    console.log(`\n📞 處理新請求 #${USAGE_TRACKER.totalRequests}`);
     const { model, name: modelName } = await getWorkingModel();
     
-    console.log(`📊 使用狀況: ${USAGE_TRACKER.daily}/${FREE_LIMITS.perDay} | 模型: ${modelName}`);
+    console.log(`📊 使用狀況: ${USAGE_TRACKER.daily}/${FREE_LIMITS.perDay}`);
     
-    // 🔥 使用新的智能 Prompt 系統
+    // 使用智能 Prompt
     const userLang = detectLanguage(question);
     const enhancedPrompt = createEnhancedPrompt(question.trim(), userLang);
     
-    // 呼叫 AI（含超時保護）
+    console.log(`🤖 開始生成回答...`);
+    
+    // 呼叫 AI
     const result = await Promise.race([
       model.generateContent(enhancedPrompt),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('timeout')), 15000) // 增加到 15 秒，讓 AI 有時間思考
+        setTimeout(() => reject(new Error('timeout')), 20000)
       )
     ]);
     
     const response = await result.response;
     const answer = formatResponse(response.text());
     
-    // 記錄成功
     const responseTime = Date.now() - startTime;
-    console.log(`✅ 成功回應 (${responseTime}ms)`);
+    console.log(`✅ 成功回應 (總耗時: ${responseTime}ms)\n`);
     
     // 加入使用情況
     const remaining = FREE_LIMITS.perDay - USAGE_TRACKER.daily;
@@ -498,13 +574,17 @@ app.post('/api/assistant', async (req, res) => {
     
   } catch (error) {
     USAGE_TRACKER.failedRequests++;
-    console.error('❌ 處理錯誤:', error.message);
+    console.error('\n❌ 處理請求失敗');
+    console.error(`錯誤訊息: ${error.message}`);
+    console.error(`錯誤類型: ${error.constructor.name}\n`);
     
+    // 如果是配額問題，不扣除使用次數
     if (error.message.includes('quota') || error.message.includes('429')) {
       USAGE_TRACKER.daily = Math.max(0, USAGE_TRACKER.daily - 1);
       USAGE_TRACKER.minute = Math.max(0, USAGE_TRACKER.minute - 1);
     }
     
+    // 根據錯誤類型返回不同訊息
     let errorResponse = FALLBACK_RESPONSES.error;
     let statusCode = 500;
     
@@ -514,15 +594,22 @@ app.post('/api/assistant', async (req, res) => {
     } else if (error.message.includes('quota')) {
       errorResponse = 'Google API 配額暫時用完，請幾分鐘後再試。';
       statusCode = 429;
+    } else if (error.message.includes('網路')) {
+      errorResponse = FALLBACK_RESPONSES.network;
+      statusCode = 503;
     }
     
     res.status(statusCode).json({ 
       answer: errorResponse,
-      error: error.message.substring(0, 100),
+      error: error.message.substring(0, 200),
       status: 'error',
       usage: {
         today: USAGE_TRACKER.daily,
         remaining: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily)
+      },
+      diagnostics: {
+        networkErrors: USAGE_TRACKER.networkErrors,
+        failedRequests: USAGE_TRACKER.failedRequests
       }
     });
   }
@@ -538,7 +625,8 @@ app.get('/api/usage', (req, res) => {
       daily: USAGE_TRACKER.daily,
       minute: USAGE_TRACKER.minute,
       total: USAGE_TRACKER.totalRequests,
-      failed: USAGE_TRACKER.failedRequests
+      failed: USAGE_TRACKER.failedRequests,
+      networkErrors: USAGE_TRACKER.networkErrors
     },
     remaining: {
       today: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily),
@@ -564,6 +652,12 @@ app.get('/api/health', async (req, res) => {
       apiKey: !!process.env.GOOGLE_API_KEY,
       aiService: !!genAI,
       model: !!currentModel
+    },
+    diagnostics: {
+      networkErrors: USAGE_TRACKER.networkErrors,
+      modelFailures: USAGE_TRACKER.modelFailures,
+      totalRequests: USAGE_TRACKER.totalRequests,
+      failedRequests: USAGE_TRACKER.failedRequests
     }
   };
   
@@ -604,12 +698,13 @@ app.use((req, res) => {
 // 啟動伺服器
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('========================================');
-  console.log(`🚀 PoopBot 免費版 API 啟動 v2.1`);
+  console.log('\n========================================');
+  console.log(`🚀 PoopBot 免費版 API 啟動 v2.1-DEBUG`);
   console.log(`📍 Port: ${PORT}`);
   console.log(`💚 模式: 完全免費（無帳單風險）`);
   console.log(`🧠 AI 品質: 已優化 Prompt 工程`);
+  console.log(`🔍 診斷模式: 已啟用詳細錯誤日誌`);
   console.log(`📊 限制: ${FREE_LIMITS.perDay} 次/天, ${FREE_LIMITS.perMinute} 次/分鐘`);
   console.log(`🔒 安全機制: 已啟用`);
-  console.log('========================================');
+  console.log('========================================\n');
 });
