@@ -6,7 +6,6 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 console.log('🚀 啟動免費版 PoopBot API');
 console.log('API Key 狀態:', process.env.GOOGLE_API_KEY ? '✅ 已設定' : '❌ 未設定');
 
-// 🔥 新增：顯示 API Key 資訊（安全檢查）
 if (process.env.GOOGLE_API_KEY) {
   console.log('🔑 API Key 前10字:', process.env.GOOGLE_API_KEY.substring(0, 10) + '...');
   console.log('🔑 API Key 長度:', process.env.GOOGLE_API_KEY.length);
@@ -41,13 +40,11 @@ const APP_FEATURES = {
   ]
 };
 
-// 檢測語言
 function detectLanguage(text) {
   if (/[\u4e00-\u9fa5]/.test(text)) return 'zh';
   return 'en';
 }
 
-// 檢測是否在詢問 App 功能
 function isAskingAboutApp(question) {
   const lowerQuestion = question.toLowerCase();
   return APP_FEATURES.keywords.some(keyword => 
@@ -55,7 +52,6 @@ function isAskingAboutApp(question) {
   );
 }
 
-// 生成 App 介紹
 function generateAppIntro(question) {
   const lang = detectLanguage(question);
   const features = APP_FEATURES.mainFeatures[lang] || APP_FEATURES.mainFeatures.en;
@@ -75,143 +71,132 @@ We help you track digestive health. Feel free to ask me any questions!`;
   }
 }
 
-// ===== 智能 Prompt 生成系統 =====
+// ===== 🔥 優化的 Prompt 生成系統 =====
 function createEnhancedPrompt(question, lang) {
   const questionType = detectQuestionType(question);
   
   if (lang === 'zh') {
-    const baseInstruction = `你是 PoopBot，專業的消化健康助手和 PoopBot App 的 AI 顧問。
-
-🎯 **你必須提供的回答品質**：
-- 給出具體數字和方法（例如："每天喝 2000-2500ml 水，分 8-10 次"，而不是"多喝水"）
-- 解釋為什麼有效（讓用戶理解原理）
-- 提供多面向建議（飲食 + 運動 + 生活習慣）
-- 說明預期效果時間（例如："3-5 天內改善"）`;
-
-    let example = '';
+    // 根據問題類型給予具體指引
+    let specificGuidance = '';
     
     if (questionType === 'constipation') {
-      example = `
-
-📋 **好的回答範例**：
-「便秘改善完整方案：
-
-**立即可做**（今天開始）：
-1. 早上空腹喝 300-500ml 溫水（約 40°C）—— 刺激腸道蠕動
-2. 腹部順時針按摩 5-10 分鐘 —— 直接促進腸蠕動
-
-**飲食調整**（3 天見效）：
-- 高纖維：每天 25-30g（燕麥、地瓜、木耳）—— 增加糞便體積
-- 益生菌：無糖優格 200ml/天 —— 改善腸道菌群
-- 好油脂：1 湯匙橄欖油 —— 潤滑腸道
-
-**生活習慣**：
-- 固定時間如廁（建議早餐後）—— 訓練腸道反射
-- 每天快走 30 分鐘 —— 促進蠕動
-
-**就醫警訊**：超過 1 週未排便、血便、劇烈腹痛」`;
+      specificGuidance = `
+針對便秘問題，請務必包含：
+1. **立即可做的事**：具體的水量（如300-500ml）、按摩方法、最佳時機
+2. **飲食調整**：具體的纖維量（25-30g/天）、推薦食物（燕麥、地瓜等）、益生菌來源
+3. **運動建議**：具體的運動類型和時長（如快走30分鐘）
+4. **生活習慣**：固定如廁時間、避免憋便
+5. **預期效果**：多久會改善（如3-5天）
+6. **就醫警訊**：何時必須看醫生（超過1週、血便等）`;
     } else if (questionType === 'diarrhea') {
-      example = `
-
-📋 **好的回答範例**：
-「腹瀉處理步驟：
-
-**緊急處理**（前 24 小時）：
-1. 補充電解質：每小時 200ml 運動飲料 —— 防止脫水
-2. BRAT 飲食：香蕉、白米、蘋果泥、吐司 —— 溫和好消化
-
-**恢復期**（2-3 天）：
-- 益生菌補充 —— 恢復菌群平衡
-- 漸進加入：雞肉粥 → 蒸魚 → 青菜
-
-**預防**：注意食物新鮮度、飯前洗手
-
-**就醫警訊**：持續 3 天、高燒、血便、嚴重脫水」`;
+      specificGuidance = `
+針對腹瀉問題，請務必包含：
+1. **緊急處理**：電解質補充量（每小時200ml）、BRAT飲食法
+2. **飲食建議**：該吃什麼、該避免什麼（具體食物）
+3. **恢復階段**：漸進式飲食計畫
+4. **預期恢復**：通常需要幾天
+5. **就醫時機**：持續3天以上、高燒、血便`;
+    } else if (questionType === 'bloating') {
+      specificGuidance = `
+針對脹氣問題，請包含：
+1. **立即緩解**：按摩技巧、姿勢調整
+2. **飲食調整**：避免易產氣食物（豆類、碳酸飲料等）
+3. **進食習慣**：慢慢吃、避免邊吃邊說話
+4. **運動幫助**：促進消化的運動`;
+    } else if (questionType === 'hemorrhoids') {
+      specificGuidance = `
+針對痔瘡問題，請包含：
+1. **舒緩方法**：溫水坐浴、冰敷
+2. **飲食調整**：增加纖維、多喝水
+3. **生活習慣**：避免久坐、如廁不要太用力
+4. **何時就醫**：嚴重出血、劇痛`;
     } else {
-      example = `
-
-📋 **回答要求**：
-- 先分析可能原因（2-3 個）
-- 提供具體解決方案（含數字、頻率）
-- 解釋原理
-- 說明見效時間
-- 標明就醫時機`;
+      specificGuidance = `
+請提供：
+1. **可能原因分析**（2-3個）
+2. **具體改善方法**（包含數字、頻率、時間）
+3. **為什麼有效**（簡單解釋原理）
+4. **預期效果時間**
+5. **何時需要就醫**`;
     }
 
-    return `${baseInstruction}${example}
+    return `你是 PoopBot，專業且友善的消化健康助手。
+
+🎯 **核心要求**：
+• 給出**具體數字和方法**（例如："每天喝 2000-2500ml 水，分 8-10 次"，而不是籠統的"多喝水"）
+• **解釋原理**：告訴用戶為什麼這樣做有效
+• **多面向建議**：同時提供飲食、運動、生活習慣的改善方法
+• **說明時間表**：告訴用戶多久會見效
+• **明確就醫時機**：什麼情況下必須看醫生
+
+${specificGuidance}
 
 👤 **用戶問題**：${question}
 
-🩺 **請提供深入、實用的專業建議**：`;
+🩺 **請用繁體中文提供深入、實用、具體的專業建議**：`;
 
   } else {
-    const baseInstruction = `You are PoopBot, a professional digestive health assistant and AI consultant for PoopBot App.
-
-🎯 **Required Answer Quality**:
-- Provide specific numbers and methods (e.g., "drink 2000-2500ml daily, split into 8-10 servings", not just "drink more water")
-- Explain WHY it works (help users understand the mechanism)
-- Offer multi-faceted advice (diet + exercise + lifestyle)
-- State expected timeframe (e.g., "improvement within 3-5 days")`;
-
-    let example = '';
+    // 英文版本
+    let specificGuidance = '';
     
     if (questionType === 'constipation') {
-      example = `
-
-📋 **Good Answer Example**:
-"Constipation Relief Plan:
-
-**Immediate Actions** (start today):
-1. Drink 300-500ml warm water on empty stomach (40°C) — stimulates bowel movement
-2. Clockwise abdominal massage 5-10 min — promotes peristalsis
-
-**Dietary Changes** (effective in 3 days):
-- High-fiber: 25-30g daily (oatmeal, sweet potato, mushrooms) — increases stool volume
-- Probiotics: 200ml unsweetened yogurt/day — improves gut flora
-- Healthy fats: 1 tbsp olive oil — lubricates intestines
-
-**Lifestyle**:
-- Regular toilet time (after breakfast) — trains bowel reflex
-- 30-min brisk walk daily — promotes movement
-
-**See Doctor If**: No bowel movement for 1 week, bloody stool, severe pain"`;
+      specificGuidance = `
+For constipation, include:
+1. **Immediate actions**: Specific water amount (300-500ml), massage techniques, best timing
+2. **Diet changes**: Specific fiber amount (25-30g/day), recommended foods (oatmeal, sweet potato), probiotic sources
+3. **Exercise**: Specific types and duration (30-min brisk walk)
+4. **Habits**: Regular toilet time, don't hold it in
+5. **Timeline**: How long until improvement (3-5 days)
+6. **When to see doctor**: Over 1 week, bloody stool, severe pain`;
     } else if (questionType === 'diarrhea') {
-      example = `
-
-📋 **Good Answer Example**:
-"Diarrhea Management:
-
-**Emergency Care** (first 24 hours):
-1. Electrolyte replacement: 200ml sports drink/hour — prevents dehydration
-2. BRAT diet: Bananas, Rice, Applesauce, Toast — gentle on stomach
-
-**Recovery** (2-3 days):
-- Probiotics — restore gut balance
-- Gradually add: chicken porridge → steamed fish → vegetables
-
-**Prevention**: Check food freshness, wash hands before meals
-
-**See Doctor If**: Lasts 3+ days, high fever, bloody stool, severe dehydration"`;
+      specificGuidance = `
+For diarrhea, include:
+1. **Emergency care**: Electrolyte replacement amount (200ml/hour), BRAT diet
+2. **Diet advice**: What to eat/avoid (specific foods)
+3. **Recovery**: Gradual diet plan
+4. **Timeline**: Usual recovery time
+5. **When to see doctor**: Lasts 3+ days, high fever, bloody stool`;
+    } else if (questionType === 'bloating') {
+      specificGuidance = `
+For bloating, include:
+1. **Immediate relief**: Massage, position adjustments
+2. **Diet changes**: Avoid gas-producing foods (beans, carbonated drinks)
+3. **Eating habits**: Eat slowly, don't talk while eating
+4. **Exercise**: Movement that aids digestion`;
+    } else if (questionType === 'hemorrhoids') {
+      specificGuidance = `
+For hemorrhoids, include:
+1. **Relief methods**: Warm sitz bath, ice packs
+2. **Diet**: Increase fiber, drink more water
+3. **Habits**: Avoid prolonged sitting, don't strain
+4. **When to see doctor**: Severe bleeding, severe pain`;
     } else {
-      example = `
-
-📋 **Answer Requirements**:
-- Analyze possible causes (2-3)
-- Provide specific solutions (with numbers, frequency)
-- Explain mechanisms
-- State timeframe for results
-- Indicate when to seek medical care`;
+      specificGuidance = `
+Please provide:
+1. **Possible causes** (2-3)
+2. **Specific solutions** (with numbers, frequency, timing)
+3. **Why it works** (simple explanation)
+4. **Expected timeline**
+5. **When to seek medical care**`;
     }
 
-    return `${baseInstruction}${example}
+    return `You are PoopBot, a professional and friendly digestive health assistant.
+
+🎯 **Core Requirements**:
+• Provide **specific numbers and methods** (e.g., "drink 2000-2500ml water daily, split into 8-10 servings", not vague "drink more water")
+• **Explain mechanisms**: Tell users WHY it works
+• **Multi-faceted advice**: Provide diet, exercise, and lifestyle improvements
+• **State timelines**: Tell users how long until they see results
+• **Clear medical consultation criteria**: When they MUST see a doctor
+
+${specificGuidance}
 
 👤 **User Question**: ${question}
 
-🩺 **Provide in-depth, practical professional advice**:`;
+🩺 **Please provide in-depth, practical, specific professional advice in English**:`;
   }
 }
 
-// 檢測問題類型
 function detectQuestionType(question) {
   const lower = question.toLowerCase();
   
@@ -231,7 +216,7 @@ function detectQuestionType(question) {
   return 'general';
 }
 
-// ===== 免費額度管理系統 =====
+// ===== 免費額度管理 =====
 const USAGE_TRACKER = {
   daily: 0,
   minute: 0,
@@ -239,8 +224,7 @@ const USAGE_TRACKER = {
   lastMinuteReset: Date.now(),
   totalRequests: 0,
   failedRequests: 0,
-  modelFailures: {},
-  networkErrors: 0  // 🔥 新增：網路錯誤計數
+  modelFailures: {}
 };
 
 const FREE_LIMITS = {
@@ -285,15 +269,15 @@ function canUseAPI() {
   return { allowed: true };
 }
 
-// 模型管理
+// 🔥 2025年最新模型配置
 const MODEL_CONFIG = {
-  primary: 'gemini-2.5-flash',      // 最新最快模型
+  primary: 'gemini-2.5-flash',
   fallbacks: [
-    'gemini-2.0-flash',              // 備用方案 1
-    'gemini-2.5-pro',                // 備用方案 2（最強但較慢）
-    'gemini-2.0-flash-lite'          // 備用方案 3（輕量版）
+    'gemini-2.0-flash',
+    'gemini-2.5-pro',
+    'gemini-2.0-flash-lite'
   ],
-  maxRetries: 2  // 減少重試次數，加快速度
+  maxRetries: 2
 };
 
 let currentModel = null;
@@ -315,42 +299,31 @@ function initializeAI() {
 
 const genAI = initializeAI();
 
-// 🔥 方案 B：加強版模型獲取（含詳細錯誤和重試）
 async function getWorkingModel() {
   if (!genAI) {
     throw new Error('AI 服務未初始化');
   }
   
-  // 嘗試使用快取模型
+  // 使用快取
   if (currentModel && currentModelName) {
     try {
-      console.log(`♻️  嘗試使用快取模型: ${currentModelName}`);
-      const testResult = await currentModel.generateContent('test');
-      await testResult.response.text();
-      console.log(`✅ 快取模型可用: ${currentModelName}`);
+      console.log(`♻️  使用快取模型: ${currentModelName}`);
       return { model: currentModel, name: currentModelName };
     } catch (err) {
-      console.log(`⚠️  快取模型 ${currentModelName} 失效`);
-      console.log(`   失效原因: ${err.message}`);
+      console.log(`⚠️  快取模型失效: ${currentModelName}`);
       currentModel = null;
       currentModelName = null;
     }
   }
   
-  // 嘗試所有可用模型
   const allModels = [MODEL_CONFIG.primary, ...MODEL_CONFIG.fallbacks];
-  console.log(`\n🔍 開始測試 ${allModels.length} 個模型...`);
+  console.log(`\n🔍 測試 ${allModels.length} 個模型...`);
   
   for (const modelName of allModels) {
-    console.log(`\n📡 測試模型: ${modelName}`);
-    
     try {
-      const model = genAI.getGenerativeModel({ 
-        model: modelName
-      });
+      console.log(`📡 測試: ${modelName}`);
       
-      // 🔥 重試機制（每個模型嘗試 3 次）
-      let lastError = null;
+      const model = genAI.getGenerativeModel({ model: modelName });
       
       for (let attempt = 1; attempt <= MODEL_CONFIG.maxRetries; attempt++) {
         try {
@@ -370,77 +343,41 @@ async function getWorkingModel() {
           return { model, name: modelName };
           
         } catch (retryErr) {
-          lastError = retryErr;
+          console.log(`   ❌ 嘗試 ${attempt} 失敗: ${retryErr.message.substring(0, 80)}`);
           
-          // 🔥 詳細錯誤分析
-          console.log(`   ❌ 嘗試 ${attempt} 失敗`);
-          console.log(`   錯誤訊息: ${retryErr.message}`);
-          console.log(`   錯誤類型: ${retryErr.constructor.name}`);
-          
-          // 檢查是否為網路錯誤
-          if (retryErr.message.includes('fetch') || 
-              retryErr.message.includes('network') ||
-              retryErr.message.includes('ECONNREFUSED') ||
-              retryErr.message.includes('ETIMEDOUT')) {
-            console.log(`   🌐 這是網路連接問題`);
-            USAGE_TRACKER.networkErrors++;
-          }
-          
-          // 如果還有重試機會，等待後重試
           if (attempt < MODEL_CONFIG.maxRetries) {
-            const waitTime = attempt * 2000; // 2秒、4秒、6秒
+            const waitTime = attempt * 2000;
             console.log(`   ⏳ 等待 ${waitTime/1000} 秒後重試...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
           }
         }
       }
       
-      // 所有重試都失敗，記錄並繼續下一個模型
-      console.log(`   ⚠️  模型 ${modelName} 的所有嘗試都失敗`);
-      if (lastError) {
-        console.log(`   最後錯誤: ${lastError.message}`);
-      }
-      
+      console.log(`   ⚠️  模型 ${modelName} 的所有嘗試都失敗\n`);
       USAGE_TRACKER.modelFailures[modelName] = (USAGE_TRACKER.modelFailures[modelName] || 0) + 1;
       
     } catch (err) {
-      console.log(`   💥 模型 ${modelName} 初始化失敗: ${err.message}`);
+      console.log(`   💥 模型 ${modelName} 初始化失敗\n`);
       USAGE_TRACKER.modelFailures[modelName] = (USAGE_TRACKER.modelFailures[modelName] || 0) + 1;
     }
   }
   
-  // 所有模型都失敗
-  console.log('\n❌ 所有模型都無法使用\n');
-  console.log('📊 錯誤統計:');
-  console.log(`   網路錯誤次數: ${USAGE_TRACKER.networkErrors}`);
-  console.log(`   模型失敗記錄:`, USAGE_TRACKER.modelFailures);
-  
-  // 根據錯誤類型給出建議
-  if (USAGE_TRACKER.networkErrors > 0) {
-    throw new Error('網路連接問題：無法連接到 Google AI API。請檢查：\n1. Render 是否允許外部 API 連接\n2. API Key 是否正確\n3. Google AI Studio 服務狀態');
-  }
-  
+  console.log('\n❌ 所有模型都無法使用');
   throw new Error('所有模型都無法使用，請稍後再試');
 }
 
-// 備用回應
 const FALLBACK_RESPONSES = {
-  greeting: [
-    "你好！我是 PoopBot，你的消化健康助手。有什麼可以幫助你的嗎？",
-    "嗨！需要消化健康的建議嗎？我在這裡幫助你！"
-  ],
   error: "抱歉，目前服務繁忙。以下是一些基本建議：\n• 多喝水（每天8杯）\n• 攝取纖維（蔬果）\n• 規律運動\n• 保持良好作息",
   limit: "今日免費額度已用完。明天再見！\n\n💡 小提醒：多喝水對消化很有幫助喔！",
-  network: "網路連接問題，無法連接到 AI 服務。請稍後再試或聯繫管理員。"
+  apiKeyExpired: "⚠️ API Key 已過期\n\n請管理員前往 Google AI Studio 重新生成 API Key。"
 };
 
-// 格式化回應
 function formatResponse(text) {
   if (!text) return FALLBACK_RESPONSES.error;
   
   return text
     .replace(/\*\*\*(.+?)\*\*\*/g, '【$1】')
-    .replace(/\*\*(.+?)\*\*/g, '【$1】')
+    .replace(/\*\*(.+?)\*\*\*/g, '【$1】')
     .replace(/^\* /gm, '• ')
     .replace(/^- /gm, '• ')
     .replace(/\n{3,}/g, '\n\n')
@@ -453,31 +390,26 @@ app.get('/', (req, res) => {
   resetCounters();
   res.json({ 
     service: 'PoopBot AI Assistant',
-    version: '2.1-ENHANCED-DEBUG',
+    version: '2.5-OPTIMIZED',
     status: genAI ? 'ready' : 'no_api_key',
+    model: currentModelName || 'not_initialized',
     limits: FREE_LIMITS,
     usage: {
       today: USAGE_TRACKER.daily,
       remaining: FREE_LIMITS.perDay - USAGE_TRACKER.daily
     },
-    diagnostics: {
-      networkErrors: USAGE_TRACKER.networkErrors,
-      modelFailures: USAGE_TRACKER.modelFailures,
-      currentModel: currentModelName || 'none'
-    },
-    message: '完全免費版本 - 改進 AI 回答品質 + 診斷模式',
+    message: 'Gemini 2.5 + 優化 Prompt + 增強回答品質',
     timestamp: new Date().toISOString()
   });
 });
 
-// 主要聊天端點
 app.post('/api/assistant', async (req, res) => {
   const startTime = Date.now();
   const { question } = req.body;
   
   if (!genAI) {
     return res.status(503).json({ 
-      answer: '服務未就緒。請確認已設定 API Key。',
+      answer: FALLBACK_RESPONSES.apiKeyExpired,
       error: 'service_unavailable'
     });
   }
@@ -489,13 +421,9 @@ app.post('/api/assistant', async (req, res) => {
     });
   }
   
-  // 檢查是否詢問 App 功能
   if (isAskingAboutApp(question)) {
-    const appIntro = generateAppIntro(question);
-    console.log(`📱 回應 App 介紹（不消耗 API 額度）`);
-    
     return res.json({
-      answer: appIntro,
+      answer: generateAppIntro(question),
       model: 'app-intro',
       status: 'success',
       usage: {
@@ -506,7 +434,6 @@ app.post('/api/assistant', async (req, res) => {
     });
   }
   
-  // 檢查使用限制
   const usageCheck = canUseAPI();
   if (!usageCheck.allowed) {
     const response = usageCheck.reason === 'daily_limit' 
@@ -515,38 +442,30 @@ app.post('/api/assistant', async (req, res) => {
       
     return res.status(429).json({ 
       answer: response,
-      error: usageCheck.reason,
-      limit: usageCheck.limit,
-      usage: {
-        today: USAGE_TRACKER.daily,
-        remaining: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily)
-      }
+      error: usageCheck.reason
     });
   }
   
-  // 增加計數
   USAGE_TRACKER.daily++;
   USAGE_TRACKER.minute++;
   USAGE_TRACKER.totalRequests++;
   
   try {
-    // 取得可用模型
     console.log(`\n📞 處理新請求 #${USAGE_TRACKER.totalRequests}`);
     const { model, name: modelName } = await getWorkingModel();
     
     console.log(`📊 使用狀況: ${USAGE_TRACKER.daily}/${FREE_LIMITS.perDay}`);
     
-    // 使用智能 Prompt
     const userLang = detectLanguage(question);
     const enhancedPrompt = createEnhancedPrompt(question.trim(), userLang);
     
     console.log(`🤖 開始生成回答...`);
     
-    // 呼叫 AI
+    // 🔥 增加超時到 45 秒
     const result = await Promise.race([
       model.generateContent(enhancedPrompt),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('timeout')), 20000)
+        setTimeout(() => reject(new Error('timeout')), 45000)
       )
     ]);
     
@@ -554,9 +473,8 @@ app.post('/api/assistant', async (req, res) => {
     const answer = formatResponse(response.text());
     
     const responseTime = Date.now() - startTime;
-    console.log(`✅ 成功回應 (總耗時: ${responseTime}ms)\n`);
+    console.log(`✅ 成功回應 (${responseTime}ms)\n`);
     
-    // 加入使用情況
     const remaining = FREE_LIMITS.perDay - USAGE_TRACKER.daily;
     const usageInfo = remaining <= 5 
       ? `\n\n📊 今日剩餘：${remaining} 次`
@@ -575,48 +493,35 @@ app.post('/api/assistant', async (req, res) => {
     
   } catch (error) {
     USAGE_TRACKER.failedRequests++;
-    console.error('\n❌ 處理請求失敗');
-    console.error(`錯誤訊息: ${error.message}`);
-    console.error(`錯誤類型: ${error.constructor.name}\n`);
+    console.error(`❌ 錯誤: ${error.message}\n`);
     
-    // 如果是配額問題，不扣除使用次數
-    if (error.message.includes('quota') || error.message.includes('429')) {
-      USAGE_TRACKER.daily = Math.max(0, USAGE_TRACKER.daily - 1);
-      USAGE_TRACKER.minute = Math.max(0, USAGE_TRACKER.minute - 1);
+    // API Key 過期特別處理
+    if (error.message.includes('expired') || error.message.includes('API_KEY_INVALID')) {
+      return res.status(503).json({
+        answer: FALLBACK_RESPONSES.apiKeyExpired,
+        error: 'api_key_expired'
+      });
     }
     
-    // 根據錯誤類型返回不同訊息
     let errorResponse = FALLBACK_RESPONSES.error;
     let statusCode = 500;
     
     if (error.message.includes('timeout')) {
-      errorResponse = '回應超時，請重試。';
+      errorResponse = '回應超時，AI 思考時間過長。請簡化問題或稍後再試。';
       statusCode = 504;
     } else if (error.message.includes('quota')) {
-      errorResponse = 'Google API 配額暫時用完，請幾分鐘後再試。';
+      errorResponse = 'API 使用量已達上限，請稍後再試。';
       statusCode = 429;
-    } else if (error.message.includes('網路')) {
-      errorResponse = FALLBACK_RESPONSES.network;
-      statusCode = 503;
     }
     
     res.status(statusCode).json({ 
       answer: errorResponse,
-      error: error.message.substring(0, 200),
-      status: 'error',
-      usage: {
-        today: USAGE_TRACKER.daily,
-        remaining: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily)
-      },
-      diagnostics: {
-        networkErrors: USAGE_TRACKER.networkErrors,
-        failedRequests: USAGE_TRACKER.failedRequests
-      }
+      error: error.message.substring(0, 100),
+      status: 'error'
     });
   }
 });
 
-// 使用情況端點
 app.get('/api/usage', (req, res) => {
   resetCounters();
   
@@ -626,8 +531,7 @@ app.get('/api/usage', (req, res) => {
       daily: USAGE_TRACKER.daily,
       minute: USAGE_TRACKER.minute,
       total: USAGE_TRACKER.totalRequests,
-      failed: USAGE_TRACKER.failedRequests,
-      networkErrors: USAGE_TRACKER.networkErrors
+      failed: USAGE_TRACKER.failedRequests
     },
     remaining: {
       today: Math.max(0, FREE_LIMITS.perDay - USAGE_TRACKER.daily),
@@ -637,34 +541,23 @@ app.get('/api/usage', (req, res) => {
       current: currentModelName || 'none',
       failures: USAGE_TRACKER.modelFailures
     },
-    history: usageLog.slice(-7),
-    resetTime: {
-      daily: '每日 00:00',
-      minute: new Date(USAGE_TRACKER.lastMinuteReset + 60000).toISOString()
-    }
+    history: usageLog.slice(-7)
   });
 });
 
-// 健康檢查
-app.get('/api/health', async (req, res) => {
+app.get('/api/health', (req, res) => {
   const health = {
     status: 'unknown',
     checks: {
       apiKey: !!process.env.GOOGLE_API_KEY,
       aiService: !!genAI,
       model: !!currentModel
-    },
-    diagnostics: {
-      networkErrors: USAGE_TRACKER.networkErrors,
-      modelFailures: USAGE_TRACKER.modelFailures,
-      totalRequests: USAGE_TRACKER.totalRequests,
-      failedRequests: USAGE_TRACKER.failedRequests
     }
   };
   
-  if (health.checks.apiKey && health.checks.aiService) {
+  if (health.checks.apiKey && health.checks.aiService && health.checks.model) {
     health.status = 'healthy';
-  } else if (health.checks.apiKey) {
+  } else if (health.checks.apiKey && health.checks.aiService) {
     health.status = 'degraded';
   } else {
     health.status = 'unhealthy';
@@ -673,12 +566,11 @@ app.get('/api/health', async (req, res) => {
   res.status(health.status === 'unhealthy' ? 503 : 200).json({
     ...health,
     uptime: process.uptime(),
-    usage: USAGE_TRACKER,
+    currentModel: currentModelName,
     timestamp: new Date().toISOString()
   });
 });
 
-// 錯誤處理
 app.use((err, req, res, next) => {
   console.error('未處理錯誤:', err);
   res.status(500).json({
@@ -687,25 +579,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404
 app.use((req, res) => {
   res.status(404).json({
     error: 'not_found',
-    message: '端點不存在',
     available: ['/api/assistant', '/api/usage', '/api/health']
   });
 });
 
-// 啟動伺服器
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log('\n========================================');
-  console.log(`🚀 PoopBot 免費版 API 啟動 v2.1-DEBUG`);
+  console.log(`🚀 PoopBot v2.5-OPTIMIZED`);
   console.log(`📍 Port: ${PORT}`);
-  console.log(`💚 模式: 完全免費（無帳單風險）`);
-  console.log(`🧠 AI 品質: 已優化 Prompt 工程`);
-  console.log(`🔍 診斷模式: 已啟用詳細錯誤日誌`);
-  console.log(`📊 限制: ${FREE_LIMITS.perDay} 次/天, ${FREE_LIMITS.perMinute} 次/分鐘`);
-  console.log(`🔒 安全機制: 已啟用`);
+  console.log(`💚 完全免費 + Gemini 2.5`);
+  console.log(`🧠 優化 Prompt 工程`);
+  console.log(`📊 ${FREE_LIMITS.perDay}/天, ${FREE_LIMITS.perMinute}/分`);
   console.log('========================================\n');
 });
